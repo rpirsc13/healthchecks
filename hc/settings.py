@@ -37,10 +37,34 @@ SECRET_KEY = os.getenv("SECRET_KEY", "---")
 METRICS_KEY = os.getenv("METRICS_KEY")
 DEBUG = envbool("DEBUG", "True")
 ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "*").split(",")
+CSRF_TRUSTED_ORIGINS = os.getenv("TRUSTED_ORIGINS", "https://*").split(",")
 DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", "healthchecks@example.org")
 SUPPORT_EMAIL = os.getenv("SUPPORT_EMAIL")
+SUPPORT_OIDC = os.getenv("USE_OIDC")
+OIDC_SSO_NAME = os.getenv("OIDC_SSO_NAME")
 USE_PAYMENTS = envbool("USE_PAYMENTS", "False")
 REGISTRATION_OPEN = envbool("REGISTRATION_OPEN", "True")
+
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
+CORS_ALLOW_ALL_ORIGINS = True
+CORS_ALLOW_METHODS = ["GET", "POST", "OPTIONS"]
+
+
+IPWARE_META_PRECEDENCE_ORDER = (
+    'HTTP_CF_CONNECTING_IP',
+    'HTTP_X_FORWARDED_FOR', 'X_FORWARDED_FOR', # client, proxy1, proxy2
+    'HTTP_CLIENT_IP',
+    'HTTP_X_REAL_IP',
+    'HTTP_X_FORWARDED',
+    'HTTP_X_CLUSTER_CLIENT_IP',
+    'HTTP_FORWARDED_FOR',
+    'HTTP_FORWARDED',
+    'HTTP_VIA',
+    'REMOTE_ADDR',
+)
+
+
 if admins := os.getenv("ADMINS"):
     ADMINS = [(email, email) for email in admins.split(",")]
 
@@ -67,6 +91,7 @@ INSTALLED_APPS = (
     "hc.front",
     "hc.logs",
     "hc.payments",
+    "mozilla_django_oidc"
 )
 
 
@@ -90,6 +115,9 @@ AUTHENTICATION_BACKENDS = [
     "hc.accounts.backends.EmailBackend",
     "hc.accounts.backends.ProfileBackend",
 ]
+
+if envbool("USE_OIDC", "True"):
+    AUTHENTICATION_BACKENDS.append("mozilla_django_oidc.auth.OIDCAuthenticationBackend")
 
 REMOTE_USER_HEADER = os.getenv("REMOTE_USER_HEADER")
 if REMOTE_USER_HEADER:
@@ -135,6 +163,13 @@ LOGGING = {
 WSGI_APPLICATION = "hc.wsgi.application"
 TEST_RUNNER = "hc.api.tests.CustomRunner"
 DEFAULT_EXCEPTION_REPORTER_FILTER = "hc.debug.ExceptionReporterFilter"
+
+
+OIDC_RP_CLIENT_ID = os.environ['OIDC_CLIENT_ID']
+OIDC_RP_CLIENT_SECRET = os.environ['OIDC_CLIENT_SECRET']
+OIDC_OP_AUTHORIZATION_ENDPOINT = os.environ['OIDC_AUTHORIZATION_ENDPOINT']
+OIDC_OP_TOKEN_ENDPOINT = os.environ['OIDC_TOKEN_ENDPOINT']
+OIDC_OP_USER_ENDPOINT = os.environ['OIDC_USER_ENDPOINT']
 
 
 # Default database engine is SQLite. So one can just check out code,

@@ -23,4 +23,5 @@ urlpatterns = [
     path("", include("hc.api.urls")),
     path("", include("hc.front.urls")),
     path("", include("hc.payments.urls")),
+    path('oidc/', include('mozilla_django_oidc.urls')),
 ]

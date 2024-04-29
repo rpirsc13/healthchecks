@@ -207,6 +207,8 @@ def login(request: HttpRequest) -> HttpResponse:
         "bad_link": bad_link,
         "registration_open": settings.REGISTRATION_OPEN,
         "support_email": settings.SUPPORT_EMAIL,
+        "support_oidc": settings.SUPPORT_OIDC,
+        "sso_name": settings.OIDC_SSO_NAME,
         "account_closed": "account-closed" in request.GET,
     }
     return render(request, "accounts/login.html", ctx)

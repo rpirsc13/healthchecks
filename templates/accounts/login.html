@@ -31,6 +31,23 @@
 
         <div class="row">
             <div class="col-sm-6">
+            {% if support_oidc %}
+                <form id="magic-link-form" action="{% url 'oidc_authentication_init' %}">
+                    {% csrf_token %}
+                    
+                    <button type="submit" class="btn btn-lg btn-info btn-block">
+                        Login via {{ sso_name }}
+                    </button>
+                </form>
+                <div id="login-sep" class="hidden-xs"><div>or</div></div>
+            </div>
+
+            <div class="col-xs-12 visible-xs-block">
+                <div id="xs-login-sep">
+                    <div>or</div>
+                </div>
+            </div>
+            {% else %}
                 <form id="magic-link-form" method="post">
                     {% csrf_token %}
 
@@ -66,6 +83,8 @@
                     <div>or</div>
                 </div>
             </div>
+            {% endif %}
+                
 
             <div class="col-sm-6">
                 <form id="login-form" method="post">
