@@ -102,6 +102,7 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "mozilla_django_oidc.middleware.SessionRefresh",
     "hc.accounts.middleware.CustomHeaderMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
@@ -165,11 +166,12 @@ TEST_RUNNER = "hc.api.tests.CustomRunner"
 DEFAULT_EXCEPTION_REPORTER_FILTER = "hc.debug.ExceptionReporterFilter"
 
 
-OIDC_RP_CLIENT_ID = os.environ['OIDC_CLIENT_ID']
-OIDC_RP_CLIENT_SECRET = os.environ['OIDC_CLIENT_SECRET']
-OIDC_OP_AUTHORIZATION_ENDPOINT = os.environ['OIDC_AUTHORIZATION_ENDPOINT']
-OIDC_OP_TOKEN_ENDPOINT = os.environ['OIDC_TOKEN_ENDPOINT']
-OIDC_OP_USER_ENDPOINT = os.environ['OIDC_USER_ENDPOINT']
+OIDC_RP_CLIENT_ID = os.getenv('OIDC_CLIENT_ID', '')
+OIDC_RP_CLIENT_SECRET = os.getenv('OIDC_CLIENT_SECRET', "")
+OIDC_OP_AUTHORIZATION_ENDPOINT = os.getenv('OIDC_AUTHORIZATION_ENDPOINT', '')
+OIDC_OP_TOKEN_ENDPOINT = os.getenv('OIDC_TOKEN_ENDPOINT', '')
+OIDC_OP_USER_ENDPOINT = os.getenv('OIDC_USER_ENDPOINT', '')
+LOGIN_REDIRECT_URL = os.getenv('OIDC_REDIRECT_URL', '')
 
 
 # Default database engine is SQLite. So one can just check out code,
