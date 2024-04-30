@@ -173,6 +173,7 @@ OIDC_OP_TOKEN_ENDPOINT = os.getenv('OIDC_TOKEN_ENDPOINT', '')
 OIDC_OP_USER_ENDPOINT = os.getenv('OIDC_USER_ENDPOINT', '')
 LOGIN_REDIRECT_URL = os.getenv('OIDC_REDIRECT_URL', '')
 OIDC_RP_SIGN_ALGO = os.getenv('OIDC_SIGN_ALGO', "RS256")
+OIDC_OP_JWKS_ENDPOINT = os.getenv('OIDC_JWKS_URI', '')
 
 
 # Default database engine is SQLite. So one can just check out code,
