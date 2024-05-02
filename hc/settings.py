@@ -174,6 +174,7 @@ OIDC_OP_USER_ENDPOINT = os.getenv('OIDC_USER_ENDPOINT', '')
 LOGIN_REDIRECT_URL = os.getenv('OIDC_REDIRECT_URL', '')
 OIDC_RP_SIGN_ALGO = os.getenv('OIDC_SIGN_ALGO', "RS256")
 OIDC_OP_JWKS_ENDPOINT = os.getenv('OIDC_JWKS_URI', '')
+OIDC_RENEW_ID_TOKEN_EXPIRY_SECONDS = 60 * 60 * 4  # 4 hours
 
 
 # Default database engine is SQLite. So one can just check out code,
