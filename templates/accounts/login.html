@@ -32,10 +32,10 @@
             <div class="row">
                 {% if support_oidc %}
                     <div class="col-sm-12">
-                        <form id="magic-link-form" action="{% url 'oidc_authentication_init' %}">
+                        <form action="{% url 'oidc_authentication_init' %}">
                             {% csrf_token %}
 
-                            <button type="submit" class="btn btn-lg btn-info btn-block">
+                            <button type="submit" class="btn btn-lg btn-primary btn-block">
                                 Login via {{ sso_name }}
                             </button>
                         </form>
