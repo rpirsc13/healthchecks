@@ -30,7 +30,6 @@
         {% endif %}
 
             <div class="row">
-                {% if use_magic_form %}
                 {% if support_oidc %}
                     <div class="col-sm-12">
                         <form action="{% url 'oidc_authentication_init' %}">
@@ -41,7 +40,7 @@
                             </button>
                         </form>
                     </div>
-                {% else %}
+                {% elif use_magic_form %}
                     <div class="col-sm-6">
                         <form id="magic-link-form" method="post">
                             {% csrf_token %}
