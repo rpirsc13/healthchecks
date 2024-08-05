@@ -26,6 +26,7 @@ from django.contrib.auth.models import User
 from django.core import signing
 from django.core.exceptions import PermissionDenied
 from django.db.models import Case, Count, F, Q, QuerySet, When
+from django.db.models.functions import Substr
 from django.http import (
     Http404,
     HttpRequest,
@@ -40,6 +41,7 @@ from django.urls import reverse
 from django.utils.timezone import now
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
+from django_stubs_ext import WithAnnotations
 from oncalendar import OnCalendar, OnCalendarError
 from pydantic import BaseModel, TypeAdapter, ValidationError
 
@@ -848,13 +850,17 @@ def clear_events(request: AuthenticatedHttpRequest, code: UUID) -> HttpResponse:
     return redirect("hc-details", code)
 
 
+class PingAnnotations(TypedDict):
+    body_raw_preview: bytes
+
+
 def _get_events(
     check: Check,
     page_limit: int,
     start: datetime,
     end: datetime,
     kinds: tuple[str, ...] | None = None,
-) -> list[Notification | Ping | Flip]:
+) -> list[Notification | WithAnnotations[Ping, PingAnnotations] | Flip]:
     # Sorting by "n" instead of "id" is important here. Both give the same
     # query results, but sorting by "id" can cause postgres to pick
     # api_ping.id index (slow if the api_ping table is big). Sorting by
@@ -867,6 +873,11 @@ def _get_events(
             kinds_filter = kinds_filter | Q(kind__isnull=True) | Q(kind="")
         pq = pq.filter(kinds_filter)
 
+    # Optimization: defer loading body_raw, instead load its first 150 bytes
+    # as "body_raw_preview". This reduces both network I/O to database, and disk I/O
+    # on the database host if the database contains large request bodies.
+    pq = pq.defer("body_raw")
+    pq = pq.annotate(body_raw_preview=Substr("body_raw", 1, 151))
     pings = list(pq[:page_limit])
 
     # Optimization: the template will access Ping.duration, which would generate a
@@ -1663,6 +1674,8 @@ def add_slack_complete(request: AuthenticatedHttpRequest) -> HttpResponse:
 
     channel = Channel(kind="slack", project=project)
     channel.value = result.text
+    if channel.slack_channel:
+        channel.name = channel.slack_channel
     channel.save()
     channel.assign_all_checks()
 
@@ -2405,7 +2418,7 @@ def add_msteams(request: AuthenticatedHttpRequest, code: UUID) -> HttpResponse:
     if request.method == "POST":
         form = forms.AddUrlForm(request.POST)
         if form.is_valid():
-            channel = Channel(project=project, kind="msteams")
+            channel = Channel(project=project, kind="msteamsw")
             channel.value = form.cleaned_data["value"]
             channel.save()
 
@@ -2777,11 +2790,7 @@ def log_events(request: AuthenticatedHttpRequest, code: UUID) -> HttpResponse:
         start = max(start, oldest_ping.created)
 
     events = _get_events(check, 1000, start=start, end=end, kinds=form.kinds())
-    ctx = {
-        "events": events,
-        "describe_body": True,
-    }
-    response = render(request, "front/log_rows.html", ctx)
+    response = render(request, "front/log_rows.html", {"events": events})
 
     if events:
         # Include a full precision timestamp of the most recent event in a

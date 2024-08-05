@@ -35,9 +35,10 @@ if TYPE_CHECKING:
 
 try:
     import apprise
+
+    have_apprise = True
 except ImportError:
-    # Enforce
-    settings.APPRISE_ENABLED = False
+    have_apprise = False
 
 logger = logging.getLogger(__name__)
 
@@ -130,17 +131,10 @@ class Transport(object):
         # Sort by "created". Sorting by "id" can cause postgres to pick api_ping.id
         # index (slow if the api_ping table is big)
         q = flip.owner.ping_set.order_by("created")
-        # Make sure we're not selecting pings that occured after the flip
+        # Make sure we're not selecting pings that occurred after the flip
         q = q.filter(created__lte=flip.created)
 
         return q.last()
-
-
-class RemovedTransport(Transport):
-    """Dummy transport class for obsolete integrations: hipchat, pagerteam."""
-
-    def is_noop(self, status: str) -> bool:
-        return True
 
 
 class Email(Transport):
@@ -1148,8 +1142,7 @@ class Trello(HttpTransport):
 
 class Apprise(HttpTransport):
     def notify(self, flip: Flip, notification: Notification) -> None:
-        if not settings.APPRISE_ENABLED:
-            # Not supported and/or enabled
+        if not settings.APPRISE_ENABLED or not have_apprise:
             raise TransportError("Apprise is disabled and/or not installed")
 
         a = apprise.Apprise()
@@ -1211,6 +1204,82 @@ class MsTeams(HttpTransport):
         if body and "```" not in body:
             section_text = f"**Last Ping Body**:\n```\n{ body }\n```"
             sections.append({"text": section_text})
+
+        return result
+
+    def notify(self, flip: Flip, notification: Notification) -> None:
+        if not settings.MSTEAMS_ENABLED:
+            raise TransportError("MS Teams notifications are not enabled.")
+
+        self.post(self.channel.value, json=self.payload(flip))
+
+
+class MsTeamsWorkflow(HttpTransport):
+    def payload(self, flip: Flip) -> JSONDict:
+        check = flip.owner
+        name = check.name_then_code()
+        fields = SlackFields()
+        indicator = "🔴" if flip.new_status == "down" else "🟢"
+        result: JSONDict = {
+            "type": "message",
+            "attachments": [
+                {
+                    "contentType": "application/vnd.microsoft.card.adaptive",
+                    "contentUrl": None,
+                    "content": {
+                        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+                        "type": "AdaptiveCard",
+                        "fallbackText": f"“{escape(name)}” is {flip.new_status.upper()}.",
+                        "version": "1.2",
+                        "body": [
+                            {
+                                "type": "TextBlock",
+                                "text": f"{indicator} “{escape(name)}” is {flip.new_status.upper()}.",
+                                "weight": "bolder",
+                                "size": "medium",
+                                "wrap": True,
+                                "style": "heading",
+                            },
+                            {
+                                "type": "FactSet",
+                                "facts": fields,
+                            },
+                        ],
+                        "actions": [
+                            {
+                                "type": "Action.OpenUrl",
+                                "title": f"View in {settings.SITE_NAME}",
+                                "url": check.cloaked_url(),
+                            }
+                        ],
+                    },
+                }
+            ],
+        }
+
+        if check.desc:
+            fields.add("Description:", check.desc.replace("\n", "\n\n"))
+
+        if check.project.name:
+            fields.add("Project:", check.project.name)
+
+        if tags := check.tags_list():
+            formatted_tags = " ".join(tags)
+            fields.add("Tags:", formatted_tags)
+
+        if check.kind == "simple":
+            fields.add("Period:", format_duration(check.timeout))
+
+        if check.kind in ("cron", "oncalendar"):
+            fields.add("Schedule:", fix_asterisks(check.schedule))
+            fields.add("Time Zone:", check.tz)
+
+        if ping := self.last_ping(flip):
+            fields.add("Total Pings:", str(ping.n))
+            fields.add("Last Ping:", ping.formatted_kind_created())
+        else:
+            fields.add("Total Pings:", "0")
+            fields.add("Last Ping:", "Never")
 
         return result
 

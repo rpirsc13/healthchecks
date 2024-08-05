@@ -210,6 +210,7 @@ def login(request: HttpRequest) -> HttpResponse:
         "support_oidc": settings.SUPPORT_OIDC,
         "sso_name": settings.OIDC_SSO_NAME,
         "account_closed": "account-closed" in request.GET,
+        "use_magic_form": bool(settings.EMAIL_HOST),
     }
     return render(request, "accounts/login.html", ctx)
 
