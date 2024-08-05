@@ -84,8 +84,8 @@ class SchemeListFilter(admin.SimpleListFilter):
         return (("http", "HTTP"), ("https", "HTTPS"), ("email", "Email"))
 
     def queryset(
-        self, request: HttpRequest, queryset: QuerySet[Check]
-    ) -> QuerySet[Check]:
+        self, request: HttpRequest, queryset: QuerySet[Ping]
+    ) -> QuerySet[Ping]:
         if self.value():
             queryset = queryset.filter(scheme=self.value())
         return queryset
@@ -227,7 +227,8 @@ class ChannelsAdmin(ModelAdmin[Channel]):
         qs = qs.annotate(owner_email=F("project__owner__email"))
         return qs
 
-    def view_on_site(self, obj):
+    def view_on_site(self, obj: Channel) -> str:
+        assert hasattr(obj, "project_code")
         return reverse("hc-channels", args=[obj.project_code])
 
     def transport(self, obj: Channel) -> str:
