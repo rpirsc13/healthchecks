@@ -19,7 +19,7 @@ from django.contrib.humanize.templatetags.humanize import naturaltime
 from django.core.mail import mail_admins
 from django.core.signing import TimestampSigner
 from django.db import models, transaction
-from django.db.models import QuerySet
+from django.db.models import F, QuerySet
 from django.http import HttpRequest
 from django.urls import reverse
 from django.utils.functional import cached_property
@@ -32,6 +32,7 @@ from hc.api import transports
 from hc.lib import emails
 from hc.lib.date import month_boundaries, seconds_in_month
 from hc.lib.s3 import get_object, put_object, remove_objects
+from hc.lib.urls import absolute_reverse
 
 STATUSES = (("up", "Up"), ("down", "Down"), ("new", "New"), ("paused", "Paused"))
 DEFAULT_TIMEOUT = td(days=1)
@@ -40,6 +41,8 @@ NEVER = datetime(3000, 1, 1, tzinfo=timezone.utc)
 CHECK_KINDS = (("simple", "Simple"), ("cron", "Cron"), ("oncalendar", "OnCalendar"))
 # max time between start and ping where we will consider both events related:
 MAX_DURATION = td(hours=72)
+REASONS = (("", "Unknown"), ("timeout", "Timeout"), ("fail", "Fail signal"))
+
 
 TRANSPORTS: dict[str, tuple[str, type[transports.Transport]]] = {
     "apprise": ("Apprise", transports.Apprise),
@@ -51,7 +54,7 @@ TRANSPORTS: dict[str, tuple[str, type[transports.Transport]]] = {
     "linenotify": ("LINE Notify", transports.LineNotify),
     "matrix": ("Matrix", transports.Matrix),
     "mattermost": ("Mattermost", transports.Mattermost),
-    "msteams": ("MS Teams Connector (stops working Oct 2024)", transports.MsTeams),
+    "msteams": ("MS Teams Connector (stops working Jan 2025)", transports.MsTeams),
     "msteamsw": ("Microsoft Teams", transports.MsTeamsWorkflow),
     "ntfy": ("ntfy", transports.Ntfy),
     "opsgenie": ("Opsgenie", transports.Opsgenie),
@@ -121,6 +124,7 @@ class CheckDict(TypedDict, total=False):
     failure_kw: str
     filter_subject: bool
     filter_body: bool
+    badge_url: str
     last_duration: int
     unique_key: str
     ping_url: str
@@ -149,7 +153,7 @@ class DowntimeRecord:
         return up_seconds / max_seconds
 
 
-class DowntimeRecorder(object):
+class DowntimeRecorder:
     def __init__(self, boundaries: list[datetime], tz: str, created: datetime) -> None:
         """
         `boundaries` is a list of timezone-aware datetimes of the starts of time
@@ -192,7 +196,7 @@ class Check(models.Model):
     failure_kw = models.CharField(max_length=200, blank=True)
     methods = models.CharField(max_length=30, blank=True)
     manual_resume = models.BooleanField(default=False)
-    badge_key = models.UUIDField(null=True, unique=True)
+    badge_key = models.UUIDField(default=uuid.uuid4, unique=True)
 
     n_pings = models.IntegerField(default=0)
     last_ping = models.DateTimeField(null=True, blank=True)
@@ -243,14 +247,15 @@ class Check(models.Model):
         return settings.PING_ENDPOINT + str(self.code)
 
     def details_url(self, full: bool = True) -> str:
-        result = reverse("hc-details", args=[self.code])
-        return settings.SITE_ROOT + result if full else result
+        if not full:
+            return reverse("hc-details", args=[self.code])
+        return absolute_reverse("hc-details", args=[self.code])
 
     def get_absolute_url(self) -> str:
         return self.details_url(full=False)
 
     def cloaked_url(self) -> str:
-        return settings.SITE_ROOT + reverse("hc-uncloak", args=[self.unique_key])
+        return absolute_reverse("hc-uncloak", args=[self.unique_key])
 
     def email(self) -> str:
         return "%s@%s" % (self.code, settings.PING_EMAIL_DOMAIN)
@@ -310,6 +315,10 @@ class Check(models.Model):
             return grace_start + self.grace
 
         return None
+
+    @cached_property
+    def cached_status(self) -> str:
+        return self.get_status()
 
     def get_status(self, *, with_started: bool = False) -> str:
         """Return current status for display."""
@@ -374,12 +383,6 @@ class Check(models.Model):
         code_half = self.code.hex[:16]
         return hashlib.sha1(code_half.encode()).hexdigest()
 
-    def prepare_badge_key(self) -> uuid.UUID:
-        if not self.badge_key:
-            self.badge_key = uuid.uuid4()
-            Check.objects.filter(id=self.id).update(badge_key=self.badge_key)
-        return self.badge_key
-
     def to_dict(self, *, readonly: bool = False, v: int = 3) -> CheckDict:
         with_started = v == 1
         result: CheckDict = {
@@ -402,6 +405,9 @@ class Check(models.Model):
             "failure_kw": self.failure_kw,
             "filter_subject": self.filter_subject,
             "filter_body": self.filter_body,
+            # Optimization: construct badge URLs manually instead of using reverse().
+            # This is significantly quicker when returning hundreds of checks.
+            "badge_url": f"{settings.SITE_ROOT}/b/2/{self.badge_key}.svg",
         }
 
         if self.last_duration:
@@ -415,7 +421,7 @@ class Check(models.Model):
 
             # Optimization: construct API URLs manually instead of using reverse().
             # This is significantly quicker when returning hundreds of checks.
-            update_url = settings.SITE_ROOT + f"/api/v{v}/checks/{self.code}"
+            update_url = f"{settings.SITE_ROOT}/api/v{v}/checks/{self.code}"
             result["update_url"] = update_url
             result["pause_url"] = update_url + "/pause"
             result["resume_url"] = update_url + "/resume"
@@ -477,7 +483,8 @@ class Check(models.Model):
 
                 new_status = "down" if action == "fail" else "up"
                 if self.status != new_status:
-                    self.create_flip(new_status)
+                    reason = "fail" if action == "fail" else ""
+                    self.create_flip(new_status, reason=reason)
                     self.status = new_status
 
             self.alert_after = self.going_down_after()
@@ -548,7 +555,7 @@ class Check(models.Model):
             pass
 
     @property
-    def visible_pings(self) -> QuerySet["Ping"]:
+    def visible_pings(self) -> QuerySet[Ping]:
         threshold = self.n_pings - self.project.owner_profile.ping_log_limit
         return self.ping_set.filter(n__gt=threshold)
 
@@ -592,7 +599,9 @@ class Check(models.Model):
         boundaries = month_boundaries(months, tz)
         return self.downtimes_by_boundary(boundaries, tz)
 
-    def create_flip(self, new_status: str, mark_as_processed: bool = False) -> None:
+    def create_flip(
+        self, new_status: str, reason: str = "", mark_as_processed: bool = False
+    ) -> None:
         """Create a Flip object for this check.
 
         Flip objects record check status changes, and have two uses:
@@ -609,6 +618,7 @@ class Check(models.Model):
             flip.processed = flip.created
         flip.old_status = self.status
         flip.new_status = new_status
+        flip.reason = reason
         flip.save()
 
 
@@ -643,7 +653,7 @@ class Ping(models.Model):
     def to_dict(self) -> PingDict:
         if self.has_body():
             args = [self.owner.code, self.n]
-            body_url = settings.SITE_ROOT + reverse("hc-api-ping-body", args=args)
+            body_url = absolute_reverse("hc-api-ping-body", args=args)
         else:
             body_url = None
 
@@ -889,22 +899,20 @@ class Channel(models.Model):
 
     def send_verify_link(self) -> None:
         args = [self.code, self.make_token()]
-        verify_link = reverse("hc-verify-email", args=args)
-        verify_link = settings.SITE_ROOT + verify_link
+        verify_link = absolute_reverse("hc-verify-email", args=args)
         emails.verify_email(self.email.value, {"verify_link": verify_link})
 
     def get_unsub_link(self) -> str:
         signer = TimestampSigner(salt="alerts")
         signed_token = signer.sign(self.make_token())
         args = [self.code, signed_token]
-        verify_link = reverse("hc-unsubscribe-alerts", args=args)
-        return settings.SITE_ROOT + verify_link
+        return absolute_reverse("hc-unsubscribe-alerts", args=args)
 
     def send_signal_captcha_alert(self, challenge: str, raw: str) -> None:
         subject = "Signal CAPTCHA proof required"
         message = f"Challenge token: {challenge}"
         hostname = socket.gethostname()
-        submit_url = settings.SITE_ROOT + reverse("hc-signal-captcha")
+        submit_url = absolute_reverse("hc-signal-captcha")
         submit_url += "?" + urlencode({"host": hostname, "challenge": challenge})
         html_message = f"""
             On host <b>{hostname}</b>, run:<br>
@@ -935,7 +943,7 @@ class Channel(models.Model):
         _, cls = TRANSPORTS[self.kind]
         return cls(self)
 
-    def notify(self, flip: "Flip", is_test: bool = False) -> str:
+    def notify(self, flip: Flip, is_test: bool = False) -> str:
         if self.transport.is_noop(flip.new_status):
             return "no-op"
 
@@ -1134,8 +1142,7 @@ class Notification(models.Model):
         get_latest_by = "created"
 
     def status_url(self) -> str:
-        path = reverse("hc-api-notification-status", args=[self.code])
-        return settings.SITE_ROOT + path
+        return absolute_reverse("hc-api-notification-status", args=[self.code])
 
 
 class FlipDict(TypedDict):
@@ -1149,6 +1156,7 @@ class Flip(models.Model):
     processed = models.DateTimeField(null=True, blank=True)
     old_status = models.CharField(max_length=8, choices=STATUSES)
     new_status = models.CharField(max_length=8, choices=STATUSES)
+    reason = models.CharField(max_length=8, choices=REASONS, default="")
 
     class Meta:
         indexes = [
@@ -1158,7 +1166,12 @@ class Flip(models.Model):
                 fields=["processed"],
                 name="api_flip_not_processed",
                 condition=models.Q(processed=None),
-            )
+            ),
+            # For efficiently selecting flips in hc.front.views._get_events
+            models.Index(
+                fields=["owner", "created"],
+                name="api_flip_owner_created",
+            ),
         ]
 
     def to_dict(self) -> FlipDict:
@@ -1173,6 +1186,7 @@ class Flip(models.Model):
         * Exclude all channels for new->up and paused->up transitions.
         * Exclude disabled channels
         * Exclude channels where transport.is_noop(status) returns True
+        * Sort channels by last_notify_duration (shorter durations first)
         """
 
         # Don't send alerts on new->up and paused->up transitions
@@ -1183,7 +1197,15 @@ class Flip(models.Model):
             raise NotImplementedError(f"Unexpected status: {self.new_status}")
 
         q = self.owner.channel_set.exclude(disabled=True)
+        q = q.order_by(F("last_notify_duration").asc(nulls_last=True))
         return [ch for ch in q if not ch.transport.is_noop(self.new_status)]
+
+    def reason_long(self) -> str | None:
+        if self.reason == "timeout":
+            return "success signal did not arrive on time, grace time passed"
+        if self.reason == "fail":
+            return "received a failure signal"
+        return None
 
 
 class TokenBucket(models.Model):

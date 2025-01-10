@@ -253,8 +253,6 @@ class ProjectAdmin(ModelAdmin[Project]):
     def get_queryset(self, request: HttpRequest) -> QuerySet[Project]:
         qs = super(ProjectAdmin, self).get_queryset(request)
         qs = qs.annotate(num_channels=Count("channel", distinct=True))
-        # The Project model has a "num_checks" method, so use
-        # a different name for the annotation to avoid type confusion:
         qs = qs.annotate(num_checks=Count("check", distinct=True))
         qs = qs.annotate(num_members=Count("member", distinct=True))
         return qs
@@ -270,9 +268,6 @@ class ProjectAdmin(ModelAdmin[Project]):
             return obj.owner.email
         else:
             return render_to_string("admin/project_list_team.html", {"project": obj})
-
-    def email(self, obj: Project) -> str:
-        return obj.owner.email
 
     def usage(self, obj: WithAnnotations[Project, ProjectAnnotations]) -> str:
         return _format_usage(obj.num_checks, obj.num_channels)
