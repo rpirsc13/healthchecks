@@ -70,12 +70,15 @@ on the value of the <code>SMTPD_PORT</code> environment value:</p>
 <a href="https://github.com/healthchecks/healthchecks/blob/master/docker/uwsgi.ini">uwsgi.ini</a>.</p>
 <p>See also: the <a href="../self_hosted_configuration/#PING_EMAIL_DOMAIN">PING_EMAIL_DOMAIN</a>
 environment variable for customizing the domain part of the email addresses.</p>
-<h2>TLS Termination</h2>
+<h2 id="tls-termination">TLS Termination and CSRF Protection</h2>
 <p>If you plan to expose your Healthchecks instance to the public internet, make sure you
 put a TLS-terminating reverse proxy or load balancer in front of it.</p>
 <p><strong>Important:</strong> This Dockerfile uses uWSGI, which relies on the <a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/X-Forwarded-Proto">X-Forwarded-Proto</a>
-header to determine if a request is secure or not. Make sure your TLS-terminating
-reverse proxy:</p>
+header to determine if a request is secure or not. Without this information you
+may run into HTTP 403 "CSRF verification failed." errors when using your Healthchecks
+instance. See <a href="https://github.com/healthchecks/healthchecks/discussions/851#discussioncomment-6293396">this issue comment</a>
+for more information.</p>
+<p>Make sure your TLS-terminating reverse proxy:</p>
 <ul>
 <li>Discards the <code>X-Forwarded-Proto</code> header sent by the end user.</li>
 <li>Sets the <code>X-Forwarded-Proto</code> header value to match the protocol of the original request
@@ -85,6 +88,34 @@ reverse proxy:</p>
 <div class="highlight"><pre><span></span><code>proxy_set_header X-Forwarded-Proto $scheme;
 </code></pre></div>
 
+<p>If you are using haproxy, you can do the same like so:</p>
+<div class="highlight"><pre><span></span><code>http-request set-header X-Forwarded-Proto https if { ssl_fc }
+http-request set-header X-Forwarded-Proto http unless { ssl_fc }
+</code></pre></div>
+
+<h2>Upgrading Database</h2>
+<p>When you upgrade the database version in <code>docker-compose.yml</code> (for example,
+from <code>postgres:12</code> to <code>postgres:16</code>), you will also need to upgrade your postgres
+data directory. One way to do this is using the
+<a href="https://hub.docker.com/r/pgautoupgrade/pgautoupgrade">pgautoupgrade</a> container.</p>
+<p>Steps:</p>
+<ul>
+<li>As the very first step, <strong>take a full backup of your database</strong>.</li>
+<li>Stop the <code>db</code> and <code>web</code> containers: <code>docker compose stop</code></li>
+<li>Look up the name of the postgres data volume name using <code>docker volume ls</code></li>
+<li>Run <code>pgautoupgrade</code> like so:</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="n">docker</span><span class="w"> </span><span class="n">run</span><span class="w"> </span><span class="o">--</span><span class="n">rm</span><span class="w"> </span><span class="o">--</span><span class="n">name</span><span class="w"> </span><span class="n">pgauto</span><span class="w"> </span><span class="o">-</span><span class="n">it</span><span class="w"> </span>\
+<span class="w">   </span><span class="o">--</span><span class="n">mount</span><span class="w"> </span><span class="n">type</span><span class="o">=</span><span class="n">volume</span><span class="p">,</span><span class="n">source</span><span class="o">=&lt;</span><span class="n">pg</span><span class="o">-</span><span class="n">volume</span><span class="o">-</span><span class="n">name</span><span class="o">-</span><span class="n">here</span><span class="o">&gt;</span><span class="p">,</span><span class="n">target</span><span class="o">=/</span><span class="k">var</span><span class="o">/</span><span class="n">lib</span><span class="o">/</span><span class="n">postgresql</span><span class="o">/</span><span class="n">data</span><span class="w"> </span>\
+<span class="w">   </span><span class="o">-</span><span class="n">e</span><span class="w"> </span><span class="n">POSTGRES_PASSWORD</span><span class="o">=</span><span class="n">password</span><span class="w"> </span>\
+<span class="w">   </span><span class="o">-</span><span class="n">e</span><span class="w"> </span><span class="n">PGAUTO_ONESHOT</span><span class="o">=</span><span class="n">yes</span><span class="w"> </span>\
+<span class="w">   </span><span class="n">pgautoupgrade</span><span class="o">/</span><span class="n">pgautoupgrade</span><span class="p">:</span><span class="mi">16</span><span class="o">-</span><span class="n">bookworm</span>
+</code></pre></div>
+
+<ul>
+<li>Update the <code>docker-compose.yml</code> file to use the <code>postgres:16</code> image</li>
+<li>Start containers: <code>docker compose up</code></li>
+</ul>
 <h2>Pre-built Images</h2>
 <p>Pre-built Docker images, built from the Dockerfile in the <code>/docker/</code> directory,
 are available <a href="https://hub.docker.com/r/healthchecks/healthchecks">on Docker Hub</a>.

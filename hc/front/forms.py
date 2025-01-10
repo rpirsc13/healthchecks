@@ -281,6 +281,52 @@ class PhoneUpDownForm(PhoneNumberForm):
         )
 
 
+class SignalRecipientForm(forms.Form):
+    error_css_class = "has-error"
+    label = forms.CharField(max_length=100, required=False)
+    recipient = forms.CharField()
+
+    def clean_recipient(self) -> str:
+        v = self.cleaned_data["recipient"]
+
+        stripped = v.encode("ascii", "ignore").decode("ascii")
+        assert isinstance(stripped, str)
+        stripped = stripped.replace(" ", "").replace("-", "")
+        if "." in stripped:
+            # Assume it is a username
+            if not re.match(r"^\w{3,48}\.\d{2,10}$", stripped):
+                raise forms.ValidationError("Invalid username format.")
+        else:
+            # Assume it is a phone number
+            if not re.match(r"^\+\d{5,15}$", stripped):
+                raise forms.ValidationError("Invalid phone number format.")
+
+        return stripped
+
+
+class SignalForm(SignalRecipientForm):
+    up = forms.BooleanField(required=False, initial=True)
+    down = forms.BooleanField(required=False, initial=True)
+
+    def clean(self) -> None:
+        super().clean()
+
+        down = self.cleaned_data.get("down")
+        up = self.cleaned_data.get("up")
+
+        if not down and not up:
+            self.add_error("down", "Please select at least one.")
+
+    def get_json(self) -> str:
+        return json.dumps(
+            {
+                "value": self.cleaned_data["recipient"],
+                "up": self.cleaned_data["up"],
+                "down": self.cleaned_data["down"],
+            }
+        )
+
+
 class ChannelNameForm(forms.Form):
     name = forms.CharField(max_length=100, required=False)
 
@@ -329,7 +375,7 @@ class AddZulipForm(forms.Form):
 
 
 class AddTrelloForm(forms.Form):
-    token = forms.RegexField(regex=r"^[0-9a-fA-F]{64,256}$")
+    token = forms.CharField(max_length=1000)
     board_name = forms.CharField(max_length=100)
     list_name = forms.CharField(max_length=100)
     list_id = forms.RegexField(regex=r"^[0-9a-fA-F]{16,32}$")
@@ -367,7 +413,7 @@ class GroupForm(forms.Form):
 
 class NtfyForm(forms.Form):
     error_css_class = "has-error"
-    topic = forms.CharField(max_length=50)
+    topic = forms.CharField(max_length=64)
     url = LaxURLField(max_length=1000)
     token = forms.CharField(max_length=100, required=False)
     priority = forms.IntegerField(initial=3, min_value=0, max_value=5)
